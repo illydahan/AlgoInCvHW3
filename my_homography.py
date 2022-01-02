@@ -337,7 +337,7 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
     
     
     
-    stitch_order=[[3,4],[1]]
+    stitch_order=[[3,4],[1,0]]
     pt_batch_indexes = [2, 3, 1, 0]
     anchor_rect = (0,0, final_im.shape[1], final_im[0])
     
@@ -355,7 +355,8 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
             pt_batch_idx = pt_batch_indexes[curr_pt] 
             if H is not None:
                 pts2 = []
-            
+
+                # apply the image transformation because our refrence points have been transformed
                 for pt_idx in range(len(points[pt_batch_idx][0][0])):
                     pt = np.float32([points[pt_batch_idx][0][0][pt_idx], points[pt_batch_idx][0][1][pt_idx], 1])
                     trans_point = H@pt
@@ -367,9 +368,11 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
                 pts2 = points[pt_batch_idx][0]        
             
             pts1 = points[pt_batch_idx][1]
-            #pts2 = points[pt_batch_idx][0] 
             
-            if im_idx < curr_im_idx:
+            ###################################################################################
+            # Calculate the inverse transform if we stitch 2->1 instead of 1->2 for example...#
+            ###################################################################################
+            if im_idx < curr_im_idx :
                 pts1, pts2 = pts2, pts1
                 
             H = computeH(pts1, pts2)
@@ -380,17 +383,15 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
             rect2_borders = get_boarders(im2, H)
 
             H_curr, pos = correct_H(rect2_borders, H)
-            
-            
-            
+
             wrap_shape = rect2_borders[2], rect2_borders[3]
             
             #im2 = pad_image(rect2_borders, im2)
             im2_wrap = warpH(im2, H_curr, wrap_shape)
 
             
-            # plt.imshow(im2_wrap)
-            # plt.show()
+            plt.imshow(im2_wrap)
+            plt.show()
             
             final_im = pad_image(rect2_borders, final_im)
             
@@ -423,7 +424,8 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
     
     # merged_stitched[:,batch_out[0].shape[1] - width:, :] = batch_out[1][:,:, :] 
     
-    
+    plt.imshow(batch_out[0])
+    plt.show()
     return final_im
 
 ## merge multiple image ##
