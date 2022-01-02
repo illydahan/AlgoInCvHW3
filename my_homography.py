@@ -247,8 +247,6 @@ def correct_H(new_roi , H):
     if y < 0:
         ypos = -y
     
-
-    
     T = np.float32([[1,0, xpos], [0, 1, ypos], [0, 0, 1]])
     
     H_corr = T.dot(H)
@@ -329,7 +327,7 @@ def scale_cords(pts: list, scale):
     return pts_scaled
 
  
-def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: int=2):
+def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: int=2, mode='horiz'):
     assert len(points) == len(img_buffer) - 1
 
     final_im = np.copy(img_buffer[2])
@@ -359,7 +357,12 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
                 # apply the image transformation because our refrence points have been transformed
                 for pt_idx in range(len(points[pt_batch_idx][0][0])):
                     pt = np.float32([points[pt_batch_idx][0][0][pt_idx], points[pt_batch_idx][0][1][pt_idx], 1])
-                    trans_point = H@pt
+                    
+                    if im_idx < curr_im_idx:
+                        trans_point = np.linalg.inv(H)@pt
+                        
+                    else:
+                        trans_point = H@pt
                 
                     pts2 += [trans_point[:2] / trans_point[2]]
                     
@@ -368,21 +371,25 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
                 pts2 = points[pt_batch_idx][0]        
             
             pts1 = points[pt_batch_idx][1]
+            #pts2 = points[pt_batch_idx][0]
             
             ###################################################################################
             # Calculate the inverse transform if we stitch 2->1 instead of 1->2 for example...#
             ###################################################################################
-            if im_idx < curr_im_idx :
+            if im_idx < curr_im_idx:
                 pts1, pts2 = pts2, pts1
                 
             H = computeH(pts1, pts2)
             
+
             im2 = img_buffer[im_idx]
             
             #final_im = img_buffer[i]
             rect2_borders = get_boarders(im2, H)
 
             H_curr, pos = correct_H(rect2_borders, H)
+
+                
 
             wrap_shape = rect2_borders[2], rect2_borders[3]
             
@@ -396,9 +403,9 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
             final_im = pad_image(rect2_borders, final_im)
             
 
-            im2_wrap, _ = warpPano(final_im, im2_wrap, pos_calc)
+            im2_wrap, pos_t = warpPano(final_im, im2_wrap, pos_calc)
             
-            pos_calc = pos
+            pos_calc = (pos[0] + pos_t[0], pos[1] + pos_t[1])
             
 
             final_im = np.copy(im2_wrap)
@@ -424,7 +431,7 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
     
     # merged_stitched[:,batch_out[0].shape[1] - width:, :] = batch_out[1][:,:, :] 
     
-    plt.imshow(batch_out[0])
+    plt.imshow(batch_out[1])
     plt.show()
     return final_im
 
