@@ -349,7 +349,7 @@ def merge_batches(batches, im_rois, anchor_shape,mode = 'horiz'):
 
     
  
-def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: int=2, mode='horiz'):
+def wrap_multiple_imgs_manually(img_buffer: list, points: list, stitch_order = [[3,4],[1,0]], pt_batch_indexes = [2, 3, 1, 0], mode='horiz', anchor_im_idx: int=2, ):
     assert len(points) == len(img_buffer) - 1
 
     final_im = np.copy(img_buffer[2])
@@ -359,20 +359,20 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
     
     stitch_order=[[3,4],[1,0]]
     pt_batch_indexes = [2, 3, 1, 0]
-    anchor_rect = (0,0, final_im.shape[1], final_im[0])
     
-    batch_out = []
-    anchor_rois = []
     
     curr_pt = 0
+    anchor_roi = np.array([0, 0, 0, 0])
+
+    decending = False
+    tx=0
+    ty=0
     for batch in stitch_order[:]:
         pos_calc = (0, 0)
         H = None
-        final_im = np.copy(img_buffer[2])
+        #final_im = np.copy(img_buffer[2])
         curr_im_idx = anchor_im_idx
         
-
-        anchor_roi = np.array([0, 0, 0, 0])
         for im_idx in batch:
 
             pt_batch_idx = pt_batch_indexes[curr_pt] 
@@ -395,8 +395,9 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
             else:
                 pts2 = points[pt_batch_idx][0]        
             
+            
             pts1 = points[pt_batch_idx][1]
-            #pts2 = points[pt_batch_idx][0]
+        
             
             ###################################################################################
             # Calculate the inverse transform if we stitch 2->1 instead of 1->2 for example...#
@@ -422,8 +423,20 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
             im2_wrap = warpH(im2, H_curr, wrap_shape)
 
             
+            if decending:
+                
+                if mode == 'horiz':
+                    tx += anchor_roi[0]
+                    ty = anchor_roi[1]
+                else:
+                    tx = anchor_roi[0]
+                    ty += anchor_roi[1]
+                dshape = (im2_wrap.shape[1] + tx, im2_wrap.shape[0] + ty)
+                im2_wrap = cv2.warpAffine(im2_wrap, np.float32([[1, 0, tx], [0, 1, ty]],), dshape )
+            
             # plt.imshow(im2_wrap)
             # plt.show()
+            
             
             final_im, padding_rect = pad_image(rect2_borders, final_im)
             
@@ -440,18 +453,14 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
 
             final_im = np.copy(im2_wrap)
             
+            
+            plt.imshow(final_im)
+            plt.show()
+            
             curr_pt += 1
+
         
-        batch_out += [final_im]
-        anchor_rois += [anchor_roi]
-
-    
-    
-    _,_, width, height = anchor_rect
-
-    final = merge_batches(batch_out, anchor_rois[0], img_buffer[anchor_im_idx].shape[:2])
-    plt.imshow(final)
-    plt.show()
+        decending = True
 
     return final_im
 
@@ -520,7 +529,7 @@ sintra_imgs, beach_imgs = load_imgs()
 sintra_pts, beach_pts = load_points(r'data/points.pkl') 
 
 
-final_im = wrap_multiple_imgs_manually(sintra_imgs, sintra_pts)
+final_im = wrap_multiple_imgs_manually(beach_imgs, beach_pts, mode='vert')
 #final_im = sift_pano(sintra_imgs)
 
 
