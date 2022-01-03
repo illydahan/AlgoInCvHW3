@@ -96,7 +96,6 @@ def computeH(p1, p2):
 
 
 def warpH(im1, H, out_size):
-    #im1 = cv2.copyMakeBorder(im1, 700, 1000, 2000, 1000, cv2.BORDER_CONSTANT, value=0)
     warp_im = cv2.warpPerspective(im1, H, dsize=out_size, flags =  cv2.INTER_CUBIC)
     
     return warp_im
@@ -114,28 +113,6 @@ def imageStitching(img1, wrap_img2, pano_dim):
     
     return panoImg.astype(np.uint8)
 
-
-
-# im1 = cv2.imread('data/incline_L.png')
-
-# im1 = cv2.cvtColor(im1, cv2.COLOR_BGR2RGB)
-# im2 = cv2.imread('data/incline_R.png')
-
-
-# im2 = cv2.cvtColor(im2, cv2.COLOR_BGR2RGB)
-
-# p1, p2 = getPoints(im1, im2, 8)
-
-# H = computeH(p1, p2)
-# im2_wrap = warpH(im2, H, (im1.shape[1] + im2.shape[1] , im1.shape[0] + im2.shape[0]))
-
-
-# plt.imshow(im2_wrap)
-# plt.show()
-
-# pano_img = imageStitching(im1, im2_wrap)
-# plt.imshow(pano_img)
-# plt.show()
 
 def ransacH(matches, locs1, locs2, nIter, tol):
     """
@@ -273,8 +250,8 @@ def pad_image(new_roi, im1):
     
     im1 = cv2.copyMakeBorder(im1, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value= 0)
     
-    
-    return im1
+    padding_dim = (pad_left, pad_right, pad_top, pad_bottom)
+    return im1, padding_dim
 
 def stitch(im1, im2, pos, im1_shape):
     pos_x, pos_y = pos
@@ -310,14 +287,14 @@ def warpPano(prevPano, img, pos):
     
     rect = (xpos, ypos, img.shape[1], img.shape[0])
 
-    prevPano = pad_image(rect, prevPano)
+    prevPano, padding_rect = pad_image(rect, prevPano)
 
     prevPano[idx] = mean_blend(prevPano[idx], img)
     # crop extra paddings
     x, y, w, h = cv2.boundingRect(cv2.cvtColor(prevPano, cv2.COLOR_RGB2GRAY))
     result = prevPano[y : y + h, x : x + w]
     # return the resulting image with shift amount
-    return (result, (xpos - x, ypos - y))
+    return (result, (x, y), padding_rect)
 
 def scale_cords(pts: list, scale):
     
@@ -326,6 +303,51 @@ def scale_cords(pts: list, scale):
     
     return pts_scaled
 
+
+
+def merge_batches(batches, im_rois, anchor_shape,mode = 'horiz'):
+    
+    im1, im2 = batches
+    a_height, a_width  = anchor_shape
+    if mode == 'horiz':
+        stiched_width = im1.shape[1] + im2.shape[1] - a_width
+        
+        if im1.shape[0] > im2.shape[0]:
+            stitched_height = im1.shape[0]
+            diff = im1.shape[0] - im2.shape[0]
+            im2 = cv2.copyMakeBorder(im2, diff // 2,  diff // 2, 0,0, borderType=cv2.BORDER_CONSTANT, value = 0)
+            # im2 = cv2.warpAffine(im2, np.float32([[1,0, 0], [0,1,-diff]]), (im2.shape[1], im2.shape[0]))
+            
+        else:
+            stitched_height = im2.shape[0]
+            diff = im2.shape[0] - im1.shape[0]
+            im1 = cv2.copyMakeBorder(im1, diff // 2,  diff // 2 ,0, 0, borderType=cv2.BORDER_CONSTANT, value = 0)
+            # im1 = cv2.warpAffine(im1, np.float32([[1,0,0], [0,1,-diff]]), (im1.shape[1], im1.shape[0]))
+        
+    else:
+        # Todo: vertical mode
+        raise NotImplementedError()
+        
+    
+    stitched_im = np.zeros((stitched_height, stiched_width, 3))
+    
+    
+    plt.subplot(1,2,1)
+    plt.imshow(im1)
+    plt.subplot(1,2,2)
+    plt.imshow(im2)
+    plt.show()
+    
+    if mode == 'horiz':
+        x1 = im_rois[0]
+        stitched_im[:,:x1, :] = im1[:,:x1, :]
+        
+        stitched_im[:,x1:] = im2
+    
+    
+    return stitched_im.astype(np.uint8)
+
+    
  
 def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: int=2, mode='horiz'):
     assert len(points) == len(img_buffer) - 1
@@ -340,7 +362,7 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
     anchor_rect = (0,0, final_im.shape[1], final_im[0])
     
     batch_out = []
-    
+    anchor_rois = []
     
     curr_pt = 0
     for batch in stitch_order[:]:
@@ -348,6 +370,9 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
         H = None
         final_im = np.copy(img_buffer[2])
         curr_im_idx = anchor_im_idx
+        
+
+        anchor_roi = np.array([0, 0, 0, 0])
         for im_idx in batch:
 
             pt_batch_idx = pt_batch_indexes[curr_pt] 
@@ -397,55 +422,40 @@ def wrap_multiple_imgs_manually(img_buffer: list, points: list, anchor_im_idx: i
             im2_wrap = warpH(im2, H_curr, wrap_shape)
 
             
-            plt.imshow(im2_wrap)
-            plt.show()
+            # plt.imshow(im2_wrap)
+            # plt.show()
             
-            final_im = pad_image(rect2_borders, final_im)
+            final_im, padding_rect = pad_image(rect2_borders, final_im)
             
 
-            im2_wrap, pos_t = warpPano(final_im, im2_wrap, pos_calc)
+            im2_wrap, _, _ = warpPano(final_im, im2_wrap, pos_calc)
             
-            pos_calc = (pos[0] + pos_t[0], pos[1] + pos_t[1])
+            pos_calc = pos
+            
+            
+            anchor_roi[0] = padding_rect[0]
+            
+            anchor_roi[1] = padding_rect[2]
             
 
             final_im = np.copy(im2_wrap)
             
-            # plt.imshow(final_im)
-            # plt.show()
-            
             curr_pt += 1
         
         batch_out += [final_im]
+        anchor_rois += [anchor_roi]
 
     
     
     _,_, width, height = anchor_rect
-    
-    
-    # merge_width = batch_out[0].shape[1] + batch_out[1].shape[1]
-    # merge_height = batch_out[0].shape[0]
-    # merged_stitched = np.zeros((merge_height, merge_width,3))
-    
-    
-    # merged_stitched[:,:batch_out[0].shape[1] - width, :] = batch_out[0][:,:batch_out[0].shape[1] - width, :] 
-    
-    # merged_stitched[:,batch_out[0].shape[1] - width:, :] = batch_out[1][:,:, :] 
-    
-    plt.imshow(batch_out[1])
+
+    final = merge_batches(batch_out, anchor_rois[0], img_buffer[anchor_im_idx].shape[:2])
+    plt.imshow(final)
     plt.show()
+
     return final_im
 
-## merge multiple image ##
-sintra_imgs, beach_imgs = load_imgs()
 
-sintra_pts, beach_pts = load_points(r'data/points.pkl') 
-
-
-# get_boarders(sintra_pts[0])
-
-final_im = wrap_multiple_imgs_manually(sintra_imgs, sintra_pts)
-plt.imshow(final_im)
-plt.show()
 
 # im1 = cv2.imread(r'data/sintra1.JPG')
 # im1 = cv2.cvtColor(im1, cv2.COLOR_BGR2RGB)
@@ -484,6 +494,42 @@ plt.show()
 # im2_wrap[non_zero_idx] = im1[non_zero_idx]
 # plt.imshow(im2_wrap)
 # plt.show()
+
+
+def sift_pano(images: list):
+    
+    pts = []
+    im1 = images[0]
+    
+    for i in range(len(images)-1):
+        im2 = images[i+1]
+        
+        p1, p2 = getPoints_SIFT(im1 , im2)
+        im1 = im2
+        
+        pts += [[np.array(p1).T, np.array(p2).T]]
+    
+
+    final_im = wrap_multiple_imgs_manually(sintra_imgs, pts)
+    
+    return final_im
+
+## merge multiple image ##
+sintra_imgs, beach_imgs = load_imgs()
+
+sintra_pts, beach_pts = load_points(r'data/points.pkl') 
+
+
+final_im = wrap_multiple_imgs_manually(sintra_imgs, sintra_pts)
+#final_im = sift_pano(sintra_imgs)
+
+
+
+plt.imshow(final_im)
+plt.show()
+
+
+
 
 
 
